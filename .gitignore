@@ -1,0 +1,32 @@
+# Dependencies
+node_modules/
+
+# Build output
+frontend/dist/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# Environment
+.env
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# ChromaDB data (large binary files)
+backend/chroma_db/
+
+# Uploaded files
+backend/uploads/*
+!backend/uploads/.gitkeep
+backend/knowledge/*
+!backend/knowledge/.gitkeep
