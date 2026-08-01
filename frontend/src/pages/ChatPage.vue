@@ -32,7 +32,6 @@ async function handleSend() {
   // 用户消息
   const userMsg: Message = { id: ++msgId, role: 'user', content: text }
   msgs.push(userMsg)
-  chatStore.currentSession!.updatedAt = new Date().toISOString()
   input.value = ''
   scrollToBottom()
 
@@ -43,10 +42,8 @@ async function handleSend() {
   loading.value = true
   scrollToBottom()
 
-  // 用第一条用户消息做标题
-  if (chatStore.currentSession!.title === '新对话') {
-    chatStore.currentSession!.title = text.slice(0, 30).replace(/\n/g, ' ')
-  }
+  // 第一条用户消息 → 进入历史
+  chatStore.onUserMessage(text)
 
   let buffer = ''
   let cancelled = false
@@ -91,11 +88,6 @@ async function handleSend() {
   msgs[aiIndex].content += buffer
   msgs[aiIndex].isStreaming = false
   scrollToBottom()
-
-  // 标题二次确认
-  if (chatStore.currentSession!.title === text.slice(0, 30).replace(/\n/g, ' ')) {
-    chatStore.currentSession!.updatedAt = new Date().toISOString()
-  }
 }
 
 function handleKeydown(e: KeyboardEvent) {

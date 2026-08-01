@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useChatStore } from '../stores/chat'
 import { useThemeStore } from '../stores/theme'
@@ -7,6 +8,9 @@ const route = useRoute()
 const router = useRouter()
 const chatStore = useChatStore()
 const theme = useThemeStore()
+
+// 新对话是否高亮：当前是空白会话且在聊天页
+const isNewActive = computed(() => chatStore.isNewSession && route.name === 'chat')
 
 function handleNewChat() {
   chatStore.newSession()
@@ -38,15 +42,16 @@ function isCurrent(id: string): boolean {
       <p class="text-xs text-gray-400 dark:text-gray-500 mt-0.5">智能知识库管理平台</p>
     </div>
 
-    <!-- 新对话按钮 -->
-    <div class="px-3 py-3">
+    <!-- 新对话 — 导航项样式 -->
+    <div class="px-3 py-2">
       <button
         @click="handleNewChat"
-        class="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm font-medium border border-gray-200 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+        class="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors"
+        :class="isNewActive
+          ? 'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 font-medium'
+          : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'"
       >
-        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
-        </svg>
+        <span class="text-base">💬</span>
         新对话
       </button>
     </div>
@@ -72,7 +77,7 @@ function isCurrent(id: string): boolean {
       </p>
       <div class="flex-1 overflow-y-auto px-2 space-y-0.5">
         <div
-          v-for="s in chatStore.sortedSessions"
+          v-for="s in chatStore.historySessions"
           :key="s.id"
           @click="handleSelectSession(s.id)"
           class="group flex items-center justify-between px-3 py-1.5 rounded-lg cursor-pointer text-sm transition-colors"
@@ -93,7 +98,7 @@ function isCurrent(id: string): boolean {
         </div>
 
         <!-- 空状态 -->
-        <div v-if="chatStore.sessions.length === 0" class="text-xs text-gray-400 dark:text-gray-500 text-center py-6 px-3">
+        <div v-if="chatStore.historySessions.length === 0" class="text-xs text-gray-400 dark:text-gray-500 text-center py-6 px-3">
           暂无对话记录
         </div>
       </div>

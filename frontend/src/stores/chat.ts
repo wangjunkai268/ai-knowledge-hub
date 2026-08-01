@@ -29,10 +29,18 @@ export const useChatStore = defineStore('chat', {
       return s?.messages ?? []
     },
 
-    sortedSessions(state): Session[] {
-      return [...state.sessions].sort(
-        (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
-      )
+    /** 是否为空白新会话（无用户消息） */
+    isNewSession(): boolean {
+      const s = this.currentSession
+      if (!s) return true
+      return !s.messages.some(m => m.role === 'user')
+    },
+
+    /** 仅有用户消息的会话（历史对话列表用） */
+    historySessions(state): Session[] {
+      return [...state.sessions]
+        .filter(s => s.messages.some(m => m.role === 'user'))
+        .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
     },
   },
 
@@ -44,6 +52,15 @@ export const useChatStore = defineStore('chat', {
     },
 
     newSession() {
+      // 如果已有空白新会话，不重复创建
+      const blank = this.sessions.find(
+        s => !s.messages.some(m => m.role === 'user')
+      )
+      if (blank) {
+        this.currentId = blank.id
+        return
+      }
+
       const id = generateId()
       this.sessions.push({
         id,
@@ -78,7 +95,6 @@ export const useChatStore = defineStore('chat', {
       if (idx === -1) return
       this.sessions.splice(idx, 1)
 
-      // 如果删的是当前会话，切到相邻
       if (this.currentId === id) {
         if (this.sessions.length > 0) {
           this.currentId = this.sessions[Math.min(idx, this.sessions.length - 1)].id
@@ -96,10 +112,23 @@ export const useChatStore = defineStore('chat', {
       session.messages.push(msg)
       session.updatedAt = new Date().toISOString()
 
-      // 用第一条用户消息做标题
+      // 第一条用户消息 → 改标题（进入历史）
       if (session.title === '新对话' && msg.role === 'user') {
         session.title = makeTitle(msg.content)
       }
+    },
+
+    /** ChatPage 发消息后调用，确保标题更新 + 时间戳 + 触发响应式 */
+    onUserMessage(text: string) {
+      const session = this.sessions.find(s => s.id === this.currentId)
+      if (!session) return
+      const wasNew = session.title === '新对话'
+      this.$patch((state) => {
+        const s = state.sessions.find(x => x.id === this.currentId)
+        if (!s) return
+        s.updatedAt = new Date().toISOString()
+        if (wasNew) s.title = makeTitle(text)
+      })
     },
   },
 
