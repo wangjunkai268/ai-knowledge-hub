@@ -15,13 +15,13 @@ class CreateKbRequest(BaseModel):
 
 
 @router.get("/api/kbs")
-async def list_kbs():
+def list_kbs():
     """获取所有知识库"""
     return {"kbs": get_kb_list()}
 
 
 @router.post("/api/kbs")
-async def create_kb_endpoint(req: CreateKbRequest):
+def create_kb_endpoint(req: CreateKbRequest):
     """创建知识库"""
     if not req.name or not req.name.strip():
         raise HTTPException(400, "知识库名称不能为空")
@@ -29,7 +29,7 @@ async def create_kb_endpoint(req: CreateKbRequest):
 
 
 @router.delete("/api/kbs/{kb_id}")
-async def remove_kb(kb_id: str):
+def remove_kb(kb_id: str):
     """删除知识库"""
     if kb_id == DEFAULT_KB_ID:
         raise HTTPException(400, "默认知识库不可删除")

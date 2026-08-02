@@ -17,17 +17,17 @@ router = APIRouter()
 
 
 @router.get("/api/documents")
-async def list_documents(kb_id: str = Query(DEFAULT_KB_ID)):
+def list_documents(kb_id: str = Query(DEFAULT_KB_ID)):
     """获取指定知识库的文档列表"""
     return {"documents": get_document_list(kb_id)}
 
 
 @router.post("/api/documents/upload")
-async def upload_document(
+def upload_document(
     file: UploadFile = File(...),
     kb_id: str = Query(DEFAULT_KB_ID),
 ):
-    """上传文档并自动索引到指定知识库"""
+    """上传文档并自动索引到指定知识库（同步 def，FastAPI 放入线程池，避免阻塞 event loop）"""
     ext = Path(file.filename).suffix.lower()
     if ext not in (".txt", ".md", ".pdf"):
         raise HTTPException(400, f"不支持的文件格式: {ext}，仅支持 txt/md/pdf")
@@ -40,7 +40,7 @@ async def upload_document(
     safe_name = f"{uuid.uuid4().hex[:8]}_{file.filename}"
     file_path = UPLOADS_DIR / safe_name
 
-    content = await file.read()
+    content = file.file.read()   # 同步读取（def 端点中 UploadFile 用 .file）
     file_path.write_bytes(content)
 
     try:
@@ -65,7 +65,7 @@ async def upload_document(
 
 
 @router.delete("/api/documents/{doc_id}")
-async def remove_document(doc_id: str, kb_id: str = Query(DEFAULT_KB_ID)):
+def remove_document(doc_id: str, kb_id: str = Query(DEFAULT_KB_ID)):
     """删除文档并重建知识库"""
     if not delete_document(doc_id, kb_id):
         raise HTTPException(404, "文档不存在")

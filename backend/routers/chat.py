@@ -21,9 +21,9 @@ class ChatRequest(BaseModel):
 @router.post("/api/chat")
 async def chat(req: ChatRequest):
     """SSE 流式返回 AI 回答"""
-    agent = get_agent()
-
     def generate():
+        # get_agent() 首次会加载 embedding 模型，放这里由 StreamingResponse 线程池执行
+        agent = get_agent()
         try:
             for chunk in agent.query_stream(
                 question=req.message,
