@@ -7,7 +7,7 @@ from datetime import datetime
 from fastapi import APIRouter, UploadFile, File, HTTPException, Query
 
 from knowledge_loader import (
-    KNOWLEDGE_DIR, UPLOADS_DIR, DEFAULT_KB_ID,
+    KNOWLEDGE_DIR, UPLOADS_DIR, DEFAULT_KB_ID, UPLOADING_SUFFIX,
     process_single_file, build_knowledge_base, delete_document,
     get_document_list, get_knowledge_stats,
 )
@@ -43,11 +43,14 @@ def upload_document(
     content = file.file.read()   # 同步读取（def 端点中 UploadFile 用 .file）
     file_path.write_bytes(content)
 
+    # 先复制为 .uploading 临时文件（向量化前不出现在文档列表）
+    temp_target = kb_dir / (safe_name + UPLOADING_SUFFIX)
+    shutil.copy2(file_path, temp_target)
+
     try:
-        # 处理上传的文件：复制到 knowledge + 索引
-        target = kb_dir / safe_name
-        shutil.copy2(file_path, target)
-        process_single_file(target, kb_id)
+        # 向量化成功后才重命名为正式文件名
+        process_single_file(temp_target, kb_id)
+        temp_target.rename(kb_dir / safe_name)
 
         # 刷新 agent
         refresh_agent()
@@ -61,6 +64,8 @@ def upload_document(
             **get_knowledge_stats(kb_id),
         }
     except Exception as e:
+        # 失败清理临时文件，不留下未完成的文档
+        temp_target.unlink(missing_ok=True)
         raise HTTPException(500, f"处理文件失败: {e}")
 
 

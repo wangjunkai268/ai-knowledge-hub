@@ -18,10 +18,12 @@ const docs = ref<DocFile[]>([])
 const stats = ref({ document_count: 0, chunk_count: 0 })
 const deleting = ref<string | null>(null)
 
-// 上传任务队列 — 每个文件独立一条进度
+// 上传任务队列 — 每个文件独立一条进度，绑定所属知识库
 interface UploadTask {
   id: number
   fileName: string
+  kbId: string | null      // 上传目标知识库
+  kbName: string           // 目标库显示名
   progress: number
   status: 'uploading' | 'done' | 'error'
 }
@@ -72,10 +74,16 @@ async function loadDocs() {
 
 // ─── 上传（定时器驱动进度条 0→90% + API 完成跳 100%） ──
 async function handleUpload(file: File) {
+  // 记录上传时的目标库（上传期间用户可能切换知识库）
+  const targetKbId = kbStore.currentKbId
+  const targetKbName = kbStore.currentKb?.name ?? '全部知识库'
+
   const id = ++uploadIdCounter
   uploadTasks.value.push({
     id,
     fileName: file.name,
+    kbId: targetKbId,
+    kbName: targetKbName,
     progress: 0,
     status: 'uploading',
   })
@@ -90,24 +98,28 @@ async function handleUpload(file: File) {
   }, 150)
 
   try {
-    const uploadRes = await uploadDocument(file, kbStore.currentKbId)
+    const uploadRes = await uploadDocument(file, targetKbId)
 
     clearInterval(timer)
     uploadTasks.value = uploadTasks.value.filter(t => t.id !== id)
 
-    // 本地插入当前文件 + 用服务端 stats
-    const d = uploadRes.data
-    docs.value.unshift({
-      id: d.id,
-      name: d.name,
-      type: file.name.includes('.') ? '.' + file.name.split('.').pop()! : '',
-      format_size: formatSize(d.size),
-      uploaded_at: d.uploaded_at,
-    })
-    stats.value = uploadRes.data
+    // 仅在仍停留在目标库时本地插入；已切走则交给 loadDocs 刷新当前库
+    if (kbStore.currentKbId === targetKbId) {
+      const d = uploadRes.data
+      docs.value.unshift({
+        id: d.id,
+        name: d.name,
+        type: file.name.includes('.') ? '.' + file.name.split('.').pop()! : '',
+        format_size: formatSize(d.size),
+        uploaded_at: d.uploaded_at,
+      })
+      stats.value = uploadRes.data
+    } else {
+      loadDocs()   // 已切换到别的库，加载当前库真实数据
+    }
     kbStore.load()   // 刷新侧边栏文档计数
 
-    showToast('success', `"${file.name}" 上传成功，知识库已更新`)
+    showToast('success', `"${file.name}" 已上传到 ${targetKbName}`)
   } catch (e: any) {
     clearInterval(timer)
     task.status = 'error'
@@ -230,9 +242,14 @@ watch(() => kbStore.currentKbId, () => {
           :class="task.status === 'error' ? 'border-red-200' : task.status === 'done' ? 'border-emerald-200' : 'border-gray-200'"
         >
           <div class="flex items-center justify-between mb-2">
-            <span class="text-sm truncate mr-2" :class="task.status === 'error' ? 'text-red-600' : 'text-gray-600'">
-              {{ task.fileName }}
-            </span>
+            <div class="min-w-0 mr-2">
+              <p class="text-sm truncate" :class="task.status === 'error' ? 'text-red-600' : 'text-gray-600'">
+                {{ task.fileName }}
+              </p>
+              <p class="text-[10px] text-gray-400 truncate">
+                📥 上传到 {{ task.kbName }}
+              </p>
+            </div>
             <span class="text-xs font-medium shrink-0" :class="task.status === 'error' ? 'text-red-500' : task.status === 'done' ? 'text-emerald-500' : 'text-indigo-600'">
               {{ task.status === 'error' ? '失败' : task.progress + '%' }}
             </span>

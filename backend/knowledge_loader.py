@@ -29,6 +29,14 @@ UPLOADS_DIR.mkdir(exist_ok=True)
 
 EMBEDDING_MODEL = "shibing624/text2vec-base-chinese"
 
+# 上传中文件的临时后缀（向量化完成前不可见）
+UPLOADING_SUFFIX = ".uploading"
+
+
+def _is_visible_file(filename: str) -> bool:
+    """是否为可见文档（排除 kb.json 和上传中的临时文件）"""
+    return filename != "kb.json" and not filename.endswith(UPLOADING_SUFFIX)
+
 
 def _get_embeddings():
     """懒加载 embedding 模型"""
@@ -196,7 +204,7 @@ def build_knowledge_base(force_rebuild=False):
             continue
         kb_id = kb_dir.name
         for filepath in kb_dir.iterdir():
-            if not filepath.is_file() or filepath.name == "kb.json":
+            if not filepath.is_file() or not _is_visible_file(filepath.name):
                 continue
             try:
                 docs = _load_file(filepath)
@@ -255,7 +263,7 @@ def get_document_list(kb_id: str = DEFAULT_KB_ID) -> list:
         return []
     files = []
     for filepath in sorted(kb_dir.iterdir(), key=lambda x: x.stat().st_mtime, reverse=True):
-        if filepath.is_file() and filepath.name != "kb.json":
+        if filepath.is_file() and _is_visible_file(filepath.name):
             stat = filepath.stat()
             files.append({
                 "id": filepath.name,
