@@ -1,7 +1,10 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { uploadDocument, deleteDocument, getKnowledgeStats } from '../api'
+import { useKbStore } from '../stores/kb'
 import FileUpload from '../components/FileUpload.vue'
+
+const kbStore = useKbStore()
 
 interface DocFile {
   id: string
@@ -53,10 +56,13 @@ function onConfirm(result: boolean) {
   confirmModal.value = { show: false, title: '', message: '', doc: null, resolve: null }
 }
 
+// 当前知识库名（null = 全部）
+const currentKbName = computed(() => kbStore.currentKb?.name ?? '全部知识库')
+
 // ─── 数据加载（stats 接口已含文档列表，一次请求搞定） ──
 async function loadDocs() {
   try {
-    const s = await getKnowledgeStats()
+    const s = await getKnowledgeStats(kbStore.currentKbId)
     docs.value = s.data.documents
     stats.value = s.data
   } catch (e) {
@@ -84,12 +90,12 @@ async function handleUpload(file: File) {
   }, 150)
 
   try {
-    const uploadRes = await uploadDocument(file)  // 后端已处理索引，返回含 stats
+    const uploadRes = await uploadDocument(file, kbStore.currentKbId)
 
     clearInterval(timer)
     uploadTasks.value = uploadTasks.value.filter(t => t.id !== id)
 
-    // 本地插入当前文件 + 用服务端 stats（只反映已完成的文件）
+    // 本地插入当前文件 + 用服务端 stats
     const d = uploadRes.data
     docs.value.unshift({
       id: d.id,
@@ -99,6 +105,7 @@ async function handleUpload(file: File) {
       uploaded_at: d.uploaded_at,
     })
     stats.value = uploadRes.data
+    kbStore.load()   // 刷新侧边栏文档计数
 
     showToast('success', `"${file.name}" 上传成功，知识库已更新`)
   } catch (e: any) {
@@ -121,10 +128,11 @@ async function handleDelete(doc: DocFile) {
 
   deleting.value = doc.id
   try {
-    await deleteDocument(doc.id)
-    const s = await getKnowledgeStats()
+    await deleteDocument(doc.id, kbStore.currentKbId)
+    const s = await getKnowledgeStats(kbStore.currentKbId)
     stats.value = s.data
     docs.value = docs.value.filter(d => d.id !== doc.id)
+    kbStore.load()
     showToast('success', `"${doc.name}" 已删除，知识库已重建`)
   } catch (e: any) {
     showToast('error', '删除失败: ' + (e.response?.data?.detail || e.message))
@@ -147,12 +155,20 @@ function formatDate(iso: string) {
   })
 }
 
-onMounted(loadDocs)
+onMounted(async () => {
+  await kbStore.load()
+  loadDocs()
+})
 </script>
 
 <template>
   <div class="flex flex-col h-full overflow-y-auto p-6">
-    <h2 class="text-xl font-bold text-gray-800 dark:text-gray-100 mb-6">知识库管理</h2>
+    <div class="flex items-center justify-between mb-6">
+      <h2 class="text-xl font-bold text-gray-800 dark:text-gray-100">知识库管理</h2>
+      <span class="text-sm text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-gray-700 px-3 py-1 rounded-full">
+        当前：{{ currentKbName }}
+      </span>
+    </div>
 
     <!-- ═══ Toast ═══ -->
     <Transition name="toast">

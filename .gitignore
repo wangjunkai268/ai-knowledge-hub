@@ -28,5 +28,7 @@ backend/chroma_db/
 # Uploaded files
 backend/uploads/*
 !backend/uploads/.gitkeep
-backend/knowledge/*
-!backend/knowledge/.gitkeep
+
+# Knowledge base contents (user data)
+backend/knowledge/**/*
+!backend/knowledge/**/.gitkeep

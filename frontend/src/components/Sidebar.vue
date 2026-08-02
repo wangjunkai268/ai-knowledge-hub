@@ -1,13 +1,18 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useChatStore } from '../stores/chat'
 import { useThemeStore } from '../stores/theme'
+import { useKbStore } from '../stores/kb'
 
 const route = useRoute()
 const router = useRouter()
 const chatStore = useChatStore()
 const theme = useThemeStore()
+const kbStore = useKbStore()
+
+const creatingKb = ref(false)
+const newKbName = ref('')
 
 // 新对话是否高亮：当前是空白会话且在聊天页
 const isNewActive = computed(() => chatStore.isNewSession && route.name === 'chat')
@@ -32,6 +37,29 @@ function handleDeleteSession(id: string, e: Event) {
 function isCurrent(id: string): boolean {
   return chatStore.currentId === id && route.name === 'chat'
 }
+
+// ─── 知识库 ─────────────────────────────
+async function handleCreateKb() {
+  const name = newKbName.value.trim()
+  if (!name) return
+  await kbStore.create(name)
+  newKbName.value = ''
+  creatingKb.value = false
+}
+
+function handleSelectKb(id: string | null) {
+  kbStore.switch(id)
+}
+
+async function handleDeleteKb(id: string, e: Event) {
+  e.stopPropagation()
+  if (!confirm('确定删除该知识库？其所有文档和索引将被移除。')) return
+  await kbStore.remove(id)
+}
+
+onMounted(() => {
+  kbStore.load()
+})
 </script>
 
 <template>
@@ -68,6 +96,70 @@ function isCurrent(id: string): boolean {
         <span class="text-base">📚</span>
         知识库
       </router-link>
+
+      <!-- 知识库列表 -->
+      <div class="mt-1 space-y-0.5">
+        <button
+          @click="handleSelectKb(null)"
+          class="w-full flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs transition-colors"
+          :class="kbStore.currentKbId === null
+            ? 'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 font-medium'
+            : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'"
+        >
+          <span>🌐</span>
+          <span class="truncate">全部知识库</span>
+        </button>
+
+        <div
+          v-for="kb in kbStore.kbs"
+          :key="kb.id"
+          class="group flex items-center justify-between px-3 py-1.5 rounded-lg cursor-pointer text-xs transition-colors"
+          :class="kbStore.currentKbId === kb.id
+            ? 'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 font-medium'
+            : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'"
+          @click="handleSelectKb(kb.id)"
+        >
+          <span class="flex items-center gap-2 min-w-0">
+            <span>🗂</span>
+            <span class="truncate">{{ kb.name }}</span>
+            <span class="text-[10px] text-gray-400 shrink-0">{{ kb.document_count }}</span>
+          </span>
+          <button
+            v-if="kb.id !== 'kb_default'"
+            @click="(e) => handleDeleteKb(kb.id, e)"
+            class="shrink-0 p-0.5 rounded opacity-0 group-hover:opacity-100 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-400 hover:text-red-500"
+            title="删除知识库"
+          >
+            <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+            </svg>
+          </button>
+        </div>
+
+        <!-- 新建知识库 -->
+        <div v-if="creatingKb" class="px-1 pt-1">
+          <div class="flex gap-1">
+            <input
+              v-model="newKbName"
+              @keydown.enter="handleCreateKb"
+              placeholder="知识库名称"
+              class="flex-1 min-w-0 px-2 py-1 text-xs rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-800 dark:text-gray-100 focus:outline-none focus:ring-1 focus:ring-indigo-400"
+            />
+            <button
+              @click="handleCreateKb"
+              class="px-2 py-1 text-xs bg-indigo-600 text-white rounded hover:bg-indigo-700"
+            >确定</button>
+          </div>
+        </div>
+        <button
+          v-else
+          @click="creatingKb = true"
+          class="w-full flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs text-gray-400 hover:text-indigo-500 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+        >
+          <span>＋</span>
+          新建知识库
+        </button>
+      </div>
     </div>
 
     <!-- 历史对话 -->

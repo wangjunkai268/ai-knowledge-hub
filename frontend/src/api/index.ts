@@ -12,7 +12,7 @@ export function sendMessage(
   onChunk: (chunk: any) => void,
   onDone: () => void,
   onError: (err: string) => void,
-  options?: { temperature?: number; max_tokens?: number }
+  options?: { temperature?: number; max_tokens?: number; kb_id?: string | null }
 ) {
   const controller = new AbortController()
 
@@ -23,6 +23,7 @@ export function sendMessage(
       message,
       temperature: options?.temperature ?? 0.7,
       max_tokens: options?.max_tokens ?? 2048,
+      kb_id: options?.kb_id ?? null,   // null = 全局检索
     }),
     signal: controller.signal,
   })
@@ -65,28 +66,50 @@ export function sendMessage(
   return controller
 }
 
-// ─── Documents ───────────────────────────────────────
+// ─── Knowledge Bases ─────────────────────────────────
 
-export function getDocuments() {
-  return api.get('/documents')
+export interface KnowledgeBase {
+  id: string
+  name: string
+  document_count: number
+  documents: any[]
 }
 
-export function uploadDocument(file: File) {
+export function getKbs() {
+  return api.get('/kbs')
+}
+
+export function createKb(name: string) {
+  return api.post('/kbs', { name })
+}
+
+export function deleteKb(id: string) {
+  return api.delete(`/kbs/${id}`)
+}
+
+// ─── Documents ───────────────────────────────────────
+
+export function getDocuments(kbId?: string | null) {
+  return api.get('/documents', { params: { kb_id: kbId ?? undefined } })
+}
+
+export function uploadDocument(file: File, kbId?: string | null) {
   const form = new FormData()
   form.append('file', file)
   return api.post('/documents/upload', form, {
+    params: { kb_id: kbId ?? undefined },
     headers: { 'Content-Type': 'multipart/form-data' },
   })
 }
 
-export function deleteDocument(id: string) {
-  return api.delete(`/documents/${id}`)
+export function deleteDocument(id: string, kbId?: string | null) {
+  return api.delete(`/documents/${id}`, { params: { kb_id: kbId ?? undefined } })
 }
 
 // ─── Knowledge ───────────────────────────────────────
 
-export function getKnowledgeStats() {
-  return api.get('/knowledge/stats')
+export function getKnowledgeStats(kbId?: string | null) {
+  return api.get('/knowledge/stats', { params: { kb_id: kbId ?? undefined } })
 }
 
 export function reloadKnowledge() {

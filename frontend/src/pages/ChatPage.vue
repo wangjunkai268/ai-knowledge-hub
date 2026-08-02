@@ -2,10 +2,12 @@
 import { ref, nextTick, onMounted } from 'vue'
 import { sendMessage } from '../api'
 import { useChatStore } from '../stores/chat'
+import { useKbStore } from '../stores/kb'
 import type { Message } from '../types/chat'
 import ChatMessage from '../components/ChatMessage.vue'
 
 const chatStore = useChatStore()
+const kbStore = useKbStore()
 const input = ref('')
 const loading = ref(false)
 const chatRef = ref<HTMLDivElement>()
@@ -70,6 +72,7 @@ async function handleSend() {
     {
       temperature: tempSettings.temperature,
       max_tokens: tempSettings.max_tokens,
+      kb_id: kbStore.currentKbId,   // null = 全局检索
     }
   )
 
@@ -99,11 +102,20 @@ function handleKeydown(e: KeyboardEvent) {
 
 onMounted(() => {
   chatStore.ensureSession()
+  kbStore.load()
 })
 </script>
 
 <template>
   <div class="flex flex-col h-full">
+    <!-- 顶部当前知识库 -->
+    <div class="shrink-0 px-4 py-2 border-b border-gray-200 dark:border-gray-700 bg-white/50 dark:bg-gray-800/50 text-xs text-gray-500 dark:text-gray-400">
+      检索范围：
+      <span class="font-medium text-indigo-600 dark:text-indigo-400">
+        {{ kbStore.currentKb?.name ?? '全部知识库' }}
+      </span>
+    </div>
+
     <!-- 消息列表 -->
     <div ref="chatRef" class="flex-1 overflow-y-auto px-4 py-4 space-y-4">
       <ChatMessage

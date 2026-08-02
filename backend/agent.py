@@ -56,17 +56,24 @@ class RAGAgent:
         self.close()
         self._init_vectorstore()
 
-    def query_stream(self, question: str, top_k: int = 5, temperature: float = 0.7, max_tokens: int = 2048):
+    def query_stream(self, question: str, top_k: int = 5, temperature: float = 0.7, max_tokens: int = 2048, kb_id: str | None = None):
         """
         流式查询，逐 chunk yield
         每个 chunk 格式: {"type": "text"|"sources"|"done"|"error", "content": str}
+        kb_id=None → 全局检索（模型自动跨库找相关内容）
+        kb_id=xxx  → 限定在该知识库检索
         """
         if not self._vectorstore:
             yield {"type": "error", "content": "知识库为空，请先上传文档。"}
             return
 
         # 1. 检索相关文档
-        docs = self._vectorstore.similarity_search(question, k=top_k)
+        if kb_id:
+            docs = self._vectorstore.similarity_search(
+                question, k=top_k, filter={"kb_id": kb_id}
+            )
+        else:
+            docs = self._vectorstore.similarity_search(question, k=top_k)
 
         # 2. 拼接上下文
         context_parts = []
