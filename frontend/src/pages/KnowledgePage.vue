@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { uploadDocument, deleteDocument, getKnowledgeStats } from '../api'
 import { useKbStore } from '../stores/kb'
 import FileUpload from '../components/FileUpload.vue'
@@ -157,6 +157,11 @@ function formatDate(iso: string) {
 
 onMounted(async () => {
   await kbStore.load()
+  loadDocs()
+})
+
+// 切换知识库 → 重新加载该库的文档和统计
+watch(() => kbStore.currentKbId, () => {
   loadDocs()
 })
 </script>
