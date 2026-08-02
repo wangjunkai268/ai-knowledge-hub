@@ -57,11 +57,17 @@ def _get_splitter():
 
 
 def _load_file(filepath: Path):
-    """加载单个文件为文档"""
+    """加载单个文件为文档（支持 .uploading 临时文件，用真实扩展名判断类型）"""
+    # .uploading 后缀会覆盖真实扩展名（如 xxx.md.uploading），用 stem 还原
+    real_name = filepath.name
+    if real_name.endswith(UPLOADING_SUFFIX):
+        real_name = real_name[: -len(UPLOADING_SUFFIX)]
+    suffix = Path(real_name).suffix.lower()
+
     loader = None
-    if filepath.suffix in (".txt", ".md"):
+    if suffix in (".txt", ".md"):
         loader = TextLoader(str(filepath), encoding="utf-8")
-    elif filepath.suffix == ".pdf":
+    elif suffix == ".pdf":
         loader = PyPDFLoader(str(filepath))
     if loader:
         return loader.load()

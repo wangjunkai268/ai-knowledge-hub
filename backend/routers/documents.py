@@ -49,7 +49,11 @@ def upload_document(
 
     try:
         # 向量化成功后才重命名为正式文件名
-        process_single_file(temp_target, kb_id)
+        chunk_count = process_single_file(temp_target, kb_id)
+        if not chunk_count:
+            # 没有产生任何向量片段 → 视为失败，不保留文件
+            raise ValueError("文档未能被解析或向量化")
+
         temp_target.rename(kb_dir / safe_name)
 
         # 刷新 agent
