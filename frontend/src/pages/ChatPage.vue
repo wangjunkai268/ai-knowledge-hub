@@ -31,6 +31,12 @@ async function handleSend() {
   chatStore.ensureSession()
   const msgs = chatStore.currentSession!.messages
 
+  // 构造历史（push 用户消息前）：已完成的 user/assistant 消息，排除空占位
+  const history = msgs
+    .filter(m => m.role === 'user' || m.role === 'assistant')
+    .filter(m => m.content && !m.isStreaming)
+    .map(m => ({ role: m.role, content: m.content }))
+
   // 用户消息
   const userMsg: Message = { id: ++msgId, role: 'user', content: text }
   msgs.push(userMsg)
@@ -86,6 +92,7 @@ async function handleSend() {
       temperature: tempSettings.temperature,
       max_tokens: tempSettings.max_tokens,
       kb_id: kbStore.currentKbId,   // null = 全局检索
+      history,                       // 多轮对话上下文
     }
   )
 

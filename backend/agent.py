@@ -188,13 +188,15 @@ class RAGAgent:
 
     # ─── 查询主流程 ──────────────────────────────────────
 
-    def query_stream(self, question: str, top_k: int = 5, temperature: float = 0.7, max_tokens: int = 2048, kb_id: str | None = None):
+    def query_stream(self, question: str, top_k: int = 5, temperature: float = 0.7, max_tokens: int = 2048, kb_id: str | None = None, history: list | None = None):
         """
         Tool Calling 流式查询，逐事件 yield
-        事件类型: text / tool / done / error
+        事件类型: text / tool / done / error / structured
         - {"type": "tool", "name", "status": "calling"|"done"} — 工具调用过程
         - {"type": "text", "content"} — 最终回答全文（前端打字机逐字显示）
+        - {"type": "structured", "data"} — 结构化意图元数据
         kb_id=None → 全局检索；指定 → 限定该知识库
+        history=[{"role","content"}...] → 多轮对话上下文
         """
         if not self._vectorstore:
             yield {"type": "error", "content": "知识库为空，请先上传文档。"}
@@ -221,8 +223,22 @@ class RAGAgent:
 5. 如果工具结果不足以回答问题，诚实说明，然后基于已有知识补充
 6. 回答要简洁、清晰、有条理，使用 Markdown 格式"""
 
+        # 构造 messages：历史（多轮上下文）+ 当前问题
+        history_msgs = []
+        if history:
+            for item in history:
+                role = item.get("role")
+                content = item.get("content", "")
+                if not content:
+                    continue
+                if role == "user":
+                    history_msgs.append(HumanMessage(content=content))
+                elif role == "assistant":
+                    history_msgs.append(AIMessage(content=content))
+
         messages = [
             SystemMessage(content=system_prompt),
+            *history_msgs,
             HumanMessage(content=question),
         ]
 

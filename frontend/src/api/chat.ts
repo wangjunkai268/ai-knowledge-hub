@@ -1,11 +1,16 @@
 /** 对话流式 API（SSE） */
 
+export interface ChatHistoryItem {
+  role: 'user' | 'assistant'
+  content: string
+}
+
 export function sendMessage(
   message: string,
   onChunk: (chunk: any) => void,
   onDone: () => void,
   onError: (err: string) => void,
-  options?: { temperature?: number; max_tokens?: number; kb_id?: string | null }
+  options?: { temperature?: number; max_tokens?: number; kb_id?: string | null; history?: ChatHistoryItem[] }
 ) {
   const controller = new AbortController()
 
@@ -16,7 +21,8 @@ export function sendMessage(
       message,
       temperature: options?.temperature ?? 0.7,
       max_tokens: options?.max_tokens ?? 2048,
-      kb_id: options?.kb_id ?? null,   // null = 全局检索
+      kb_id: options?.kb_id ?? null,          // null = 全局检索
+      history: options?.history ?? [],        // 历史对话（多轮上下文）
     }),
     signal: controller.signal,
   })

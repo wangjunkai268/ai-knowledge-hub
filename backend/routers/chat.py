@@ -11,11 +11,17 @@ from .deps import get_agent
 router = APIRouter()
 
 
+class HistoryItem(BaseModel):
+    role: str
+    content: str
+
+
 class ChatRequest(BaseModel):
     message: str
     temperature: float = 0.7
     max_tokens: int = 2048
     kb_id: Optional[str] = None   # None = 全局检索
+    history: list[HistoryItem] = []   # 多轮对话历史
 
 
 @router.post("/api/chat")
@@ -30,6 +36,7 @@ async def chat(req: ChatRequest):
                 temperature=req.temperature,
                 max_tokens=req.max_tokens,
                 kb_id=req.kb_id,
+                history=[h.model_dump() for h in req.history],
             ):
                 data = json.dumps(chunk, ensure_ascii=False)
                 yield f"data: {data}\n\n"
