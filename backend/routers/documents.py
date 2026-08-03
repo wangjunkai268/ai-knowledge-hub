@@ -5,6 +5,7 @@ from pathlib import Path
 from datetime import datetime
 
 from fastapi import APIRouter, UploadFile, File, HTTPException, Query
+from pydantic import BaseModel
 
 from knowledge_loader import (
     KNOWLEDGE_DIR, UPLOADS_DIR, DEFAULT_KB_ID, UPLOADING_SUFFIX,
@@ -12,6 +13,13 @@ from knowledge_loader import (
     get_document_list, get_knowledge_stats,
 )
 from .deps import refresh_agent
+
+router = APIRouter()
+
+
+class BatchDeleteRequest(BaseModel):
+    kb_id: str = DEFAULT_KB_ID
+    doc_ids: list[str]
 
 router = APIRouter()
 
@@ -83,3 +91,23 @@ def remove_document(doc_id: str, kb_id: str = Query(DEFAULT_KB_ID)):
     refresh_agent()
 
     return {"success": True, "id": doc_id, **get_knowledge_stats(kb_id)}
+
+
+@router.post("/api/documents/batch-delete")
+def batch_delete_documents(req: BatchDeleteRequest):
+    """批量删除文档（一次删多个，只重建一次）"""
+    if not req.doc_ids:
+        raise HTTPException(400, "没有选择要删除的文档")
+
+    deleted = 0
+    for doc_id in req.doc_ids:
+        if delete_document(doc_id, req.kb_id):
+            deleted += 1
+
+    if deleted == 0:
+        raise HTTPException(404, "没有文档被删除")
+
+    build_knowledge_base(force_rebuild=True)
+    refresh_agent()
+
+    return {"success": True, "deleted": deleted, **get_knowledge_stats(req.kb_id)}

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
-import { uploadDocument, deleteDocument, getKnowledgeStats } from '../api'
+import { uploadDocument, deleteDocument, batchDeleteDocuments, getKnowledgeStats } from '../api'
 import { useKbStore } from '../stores/kb'
 import FileUpload from '../components/FileUpload.vue'
 
@@ -17,6 +17,14 @@ interface DocFile {
 const docs = ref<DocFile[]>([])
 const stats = ref({ document_count: 0, chunk_count: 0 })
 const deleting = ref<string | null>(null)
+const deletingBatch = ref(false)
+
+// 批量选择 — 用 Record 便于响应式
+const selected = ref<Record<string, boolean>>({})
+const selectedIds = computed(() => docs.value.filter(d => selected.value[d.id]).map(d => d.id))
+const isAllSelected = computed(() =>
+  docs.value.length > 0 && selectedIds.value.length === docs.value.length
+)
 
 // 上传任务队列 — 每个文件独立一条进度，绑定所属知识库
 interface UploadTask {
@@ -54,7 +62,7 @@ const confirmModal = ref<{
   resolve: ((v: boolean) => void) | null
 }>({ show: false, title: '', message: '', doc: null, resolve: null })
 
-function showConfirm(title: string, message: string, doc: DocFile): Promise<boolean> {
+function showConfirm(title: string, message: string, doc: DocFile | null): Promise<boolean> {
   return new Promise((resolve) => {
     confirmModal.value = { show: true, title, message, doc, resolve }
   })
@@ -135,6 +143,27 @@ async function handleUpload(file: File) {
   }
 }
 
+// ─── 批量选择 ──────────────────────────
+function isSelected(id: string): boolean {
+  return !!selected.value[id]
+}
+
+function toggleSelect(id: string) {
+  selected.value[id] = !selected.value[id]
+}
+
+function toggleSelectAll() {
+  if (isAllSelected.value) {
+    selected.value = {}
+  } else {
+    selected.value = Object.fromEntries(docs.value.map(d => [d.id, true]))
+  }
+}
+
+function clearSelection() {
+  selected.value = {}
+}
+
 // ─── 删除 ─────────────────────────────
 async function handleDelete(doc: DocFile) {
   const ok = await showConfirm(
@@ -156,6 +185,34 @@ async function handleDelete(doc: DocFile) {
     showToast('error', '删除失败: ' + (e.response?.data?.detail || e.message))
   } finally {
     deleting.value = null
+  }
+}
+
+// ─── 批量删除 ─────────────────────────
+async function handleBatchDelete() {
+  const ids = selectedIds.value
+  if (ids.length === 0) return
+
+  const ok = await showConfirm(
+    '批量删除',
+    `确定删除选中的 ${ids.length} 个文档吗？删除后知识库将重建。`,
+    null,
+  )
+  if (!ok) return
+
+  deletingBatch.value = true
+  try {
+    const res = await batchDeleteDocuments(ids, kbStore.currentKbId)
+    const s = res.data
+    stats.value = s
+    docs.value = s.documents
+    selected.value = {}
+    kbStore.load()
+    showToast('success', `已删除 ${s.deleted} 个文档，知识库已重建`)
+  } catch (e: any) {
+    showToast('error', '批量删除失败: ' + (e.response?.data?.detail || e.message))
+  } finally {
+    deletingBatch.value = false
   }
 }
 
@@ -279,7 +336,36 @@ watch(() => kbStore.currentKbId, () => {
 
     <!-- ═══ 文档列表 ═══ -->
     <div class="flex-1">
-      <h3 class="text-sm font-medium text-gray-500 dark:text-gray-400 mb-3">已上传文档</h3>
+      <!-- 标题栏 + 批量操作 -->
+      <div class="flex items-center justify-between mb-3">
+        <div class="flex items-center gap-3">
+          <label class="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400 cursor-pointer">
+            <input
+              type="checkbox"
+              :checked="isAllSelected"
+              @change="toggleSelectAll"
+              class="w-4 h-4 accent-indigo-600"
+            />
+            全选
+          </label>
+          <h3 class="text-sm font-medium text-gray-500 dark:text-gray-400">已上传文档 ({{ docs.length }})</h3>
+        </div>
+        <div v-if="selectedIds.length > 0" class="flex items-center gap-2">
+          <span class="text-xs text-gray-500 dark:text-gray-400">已选 {{ selectedIds.length }}</span>
+          <button
+            @click="handleBatchDelete"
+            :disabled="deletingBatch"
+            class="flex items-center gap-1.5 px-3 py-1.5 text-xs text-white bg-red-500 hover:bg-red-600 disabled:opacity-50 rounded-lg transition-colors"
+          >
+            <svg v-if="deletingBatch" class="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24">
+              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+            </svg>
+            批量删除
+          </button>
+        </div>
+      </div>
+
       <div v-if="docs.length === 0" class="text-sm text-gray-400 dark:text-gray-500 text-center py-8">
         暂无文档，请上传
       </div>
@@ -287,10 +373,19 @@ watch(() => kbStore.currentKbId, () => {
         <div
           v-for="doc in docs"
           :key="doc.id"
-          class="flex items-center justify-between bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg px-4 py-3 transition-all duration-300"
-          :class="deleting === doc.id ? 'opacity-60 scale-[0.98] border-red-200 bg-red-50/30' : ''"
+          class="flex items-center justify-between bg-white dark:bg-gray-800 border rounded-lg px-4 py-3 transition-all duration-300"
+          :class="[
+            deleting === doc.id ? 'opacity-60 scale-[0.98] border-red-200 bg-red-50/30' : '',
+            isSelected(doc.id) ? 'border-indigo-300 bg-indigo-50/40 dark:bg-indigo-900/20' : 'border-gray-200 dark:border-gray-700',
+          ]"
         >
           <div class="flex items-center gap-3 min-w-0">
+            <input
+              type="checkbox"
+              :checked="isSelected(doc.id)"
+              @change="toggleSelect(doc.id)"
+              class="w-4 h-4 shrink-0 accent-indigo-600"
+            />
             <span class="text-lg" :class="deleting === doc.id ? 'opacity-30' : ''">
               {{ doc.type === '.pdf' ? '📄' : '📝' }}
             </span>
@@ -316,7 +411,7 @@ watch(() => kbStore.currentKbId, () => {
             <button
               v-else
               @click="handleDelete(doc)"
-              :disabled="deleting !== null"
+              :disabled="deleting !== null || deletingBatch"
               class="text-xs text-red-500 hover:text-red-700 disabled:text-gray-300 disabled:cursor-not-allowed transition-colors"
             >
               删除

@@ -17,3 +17,10 @@ export function uploadDocument(file: File, kbId?: string | null) {
 export function deleteDocument(id: string, kbId?: string | null) {
   return api.delete(`/documents/${id}`, { params: { kb_id: kbId ?? undefined } })
 }
+
+export function batchDeleteDocuments(ids: string[], kbId?: string | null) {
+  return api.post('/documents/batch-delete', {
+    kb_id: kbId ?? null,
+    doc_ids: ids,
+  })
+}
