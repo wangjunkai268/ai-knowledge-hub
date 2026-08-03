@@ -194,32 +194,35 @@ class RAGAgent:
                 continue
         return None
 
-    def _extract_structured(self, llm, messages: list) -> dict:
+    def _extract_structured(self, llm, question: str, answer: str, used_tools: list, kb_id: str | None) -> tuple:
         """
-        让 LLM 分析对话，输出结构化意图元数据（Structured Output）
-        解析失败时返回默认值，不阻塞回答
+        让 LLM 分析用户问题与回答，输出结构化意图元数据（Structured Output）
+        只传纯净文本（question + answer），不用脏 messages
+        tools / kb_id 由代码确定，LLM 只判 intent / confidence
+        返回 (data, raw)；raw 为 LLM 原始返回，用于失败排查
         """
-        # 过滤掉原 SystemMessage（避免多个 System 指令冲突），
-        # 只保留对话内容 + 工具结果供分析
-        context = [
-            m for m in messages[-8:]
-            if not isinstance(m, SystemMessage)
-        ]
-
         result = llm.invoke([
             SystemMessage(content=STRUCTURED_SYSTEM),
-            *context,
+            HumanMessage(content=f"用户问题：{question}\n\n助手回答：{answer}"),
         ])
-        data = self._extract_json(result.content)
-        if data is None:
-            return {"intent": "chat", "confidence": 0.0, "kb_id": None, "tools": []}
+        raw = result.content
 
-        # 校验字段完整性，防止缺字段
+        data = self._extract_json(raw)
+        if data is None:
+            return {
+                "intent": "chat",
+                "confidence": 0.0,
+                "kb_id": kb_id,        # 代码确定
+                "tools": used_tools,   # 代码确定
+            }, raw
+
+        # 校验字段完整性
         data.setdefault("intent", "chat")
         data.setdefault("confidence", 0.0)
-        data.setdefault("kb_id", None)
-        data.setdefault("tools", [])
-        return data
+        # 覆盖：tools / kb_id 用代码确定的，不依赖 LLM 猜
+        data["tools"] = used_tools
+        data["kb_id"] = kb_id
+        return data, raw
 
     def _summarize(self, llm, early_msgs: list) -> str:
         """把窗口外早期对话压成一段中文摘要（上下文压缩）"""
@@ -308,6 +311,7 @@ class RAGAgent:
         ]
 
         # Tool Calling 循环：LLM 自主决定是否调用工具
+        used_tools = []   # 代码记录实际用过的工具（结构化输出不靠 LLM 猜）
         for _ in range(MAX_TOOL_ITERATIONS):
             response = llm.invoke(messages, tools=tools)
 
@@ -315,6 +319,7 @@ class RAGAgent:
                 # 有工具调用 → 逐个执行并回传结果
                 for tc in response.tool_calls:
                     tool_name = tc.get("name", "未知工具")
+                    used_tools.append(tool_name)
                     yield {"type": "tool", "name": tool_name, "status": "calling"}
 
                     result = self._run_tool(tc, kb_id, top_k)
@@ -327,9 +332,9 @@ class RAGAgent:
             # 无工具调用 → 最终回答
             if response.content:
                 yield {"type": "text", "content": response.content}
-                # 额外输出结构化意图元数据
-                meta = self._extract_structured(llm, messages)
-                yield {"type": "structured", "data": meta}
+                # 额外输出结构化意图元数据（只传纯净文本，tools/kb_id 代码确定）
+                meta, raw = self._extract_structured(llm, question, response.content, used_tools, kb_id)
+                yield {"type": "structured", "data": meta, "raw": raw}
                 yield {"type": "done", "content": response.content}
             return
 
