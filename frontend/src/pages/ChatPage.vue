@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { ref, nextTick, onMounted, watch } from 'vue'
-import { useRouter } from 'vue-router'
 import { sendMessage } from '../api'
 import { useChatStore } from '../stores/chat'
 import { useKbStore } from '../stores/kb'

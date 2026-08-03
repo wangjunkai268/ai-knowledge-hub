@@ -120,14 +120,31 @@ class RAGAgent:
             )
 
         if name == "search_web":
+            key = os.getenv("SERPAPI_API_KEY")
+            if not key:
+                return "未配置 SERPAPI_API_KEY，无法联网搜索。请基于知识库或已有知识回答。"
             try:
-                from duckduckgo_search import DDGS
-                results = DDGS().text(query, max_results=5)
-                if not results:
+                import requests
+                resp = requests.get(
+                    "https://serpapi.com/search.json",
+                    params={
+                        "q": query,
+                        "api_key": key,
+                        "engine": "google",
+                        "hl": "zh-cn",
+                        "num": 5,
+                    },
+                    timeout=15,
+                )
+                organic = resp.json().get("organic_results", [])
+                if not organic:
                     return "联网搜索没有返回结果。"
-                return "\n".join(f"{r['title']}\n{r['body']}" for r in results)
+                return "\n".join(
+                    f"{item.get('title', '')}\n{item.get('snippet', '')}"
+                    for item in organic
+                )
             except Exception:
-                return "联网搜索暂时不可用，请基于知识库或已有知识回答。"
+                return "联网搜索失败，请基于知识库或已有知识回答。"
 
         return f"未知工具: {name}"
 
