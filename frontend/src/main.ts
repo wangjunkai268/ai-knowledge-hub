@@ -21,4 +21,13 @@ const router = createRouter({
 const pinia = createPinia()
 pinia.use(piniaPluginPersistedstate)
 
+// 路由守卫：进入聊天页后滚动到底部（导航完成后 DOM 已就绪）
+router.afterEach((to) => {
+  if (to.name !== 'chat') return
+  setTimeout(() => {
+    const el = document.querySelector('.chat-scroll-container')
+    if (el) el.scrollTop = el.scrollHeight
+  }, 0)
+})
+
 createApp(App).use(pinia).use(router).mount('#app')

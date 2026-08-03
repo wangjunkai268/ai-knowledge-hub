@@ -106,10 +106,6 @@ onMounted(() => {
   kbStore.load()
 })
 
-// 切换对话 → 滚动到底部（组件被 keep-alive 保活，onMounted 不会重复触发）
-watch(() => chatStore.currentId, () => {
-  scrollToBottom()
-})
 </script>
 
 <template>
@@ -123,7 +119,7 @@ watch(() => chatStore.currentId, () => {
     </div>
 
     <!-- 消息列表 -->
-    <div ref="chatRef" class="flex-1 overflow-y-auto px-4 py-4 space-y-4">
+    <div ref="chatRef" class="chat-scroll-container flex-1 overflow-y-auto px-4 py-4 space-y-4">
       <ChatMessage
         v-for="msg in chatStore.messages"
         :key="msg.id"
