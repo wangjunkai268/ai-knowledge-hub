@@ -81,30 +81,17 @@ class RAGAgent:
     # ─── 工具定义 ────────────────────────────────────────
 
     def _make_tools(self) -> list:
-        """构建工具 schema（OpenAI 风格 dict，避免 LangChain 工具类序列化问题）"""
+        """
+        构建工具 schema（OpenAI 风格 dict）
+        知识库检索由代码默认执行（混合 RAG），不设为工具让模型猜；
+        工具只有 search_web，在知识库结果不足时由模型自主决定调用
+        """
         return [
             {
                 "type": "function",
                 "function": {
-                    "name": "search_kb",
-                    "description": "在知识库中检索信息，返回相关文档片段。当用户问题需要基于已有文档/资料回答时使用。",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "query": {
-                                "type": "string",
-                                "description": "用于检索知识库的关键词或问题",
-                            }
-                        },
-                        "required": ["query"],
-                    },
-                },
-            },
-            {
-                "type": "function",
-                "function": {
                     "name": "search_web",
-                    "description": "联网搜索获取最新信息。当知识库没有答案、或问题涉及实时/时效性数据时使用。",
+                    "description": "联网搜索获取最新信息。当知识库检索结果为空、不相关，或问题涉及实时/时效性数据时使用。",
                     "parameters": {
                         "type": "object",
                         "properties": {
@@ -119,22 +106,11 @@ class RAGAgent:
             },
         ]
 
-    def _run_tool(self, tool_call: dict, kb_id: str | None, top_k: int = 5) -> str:
+    def _run_tool(self, tool_call: dict) -> str:
         """执行单个工具调用，返回结果文本"""
         name = tool_call.get("name", "")
         args = tool_call.get("args", {})
         query = args.get("query", "")
-
-        if name == "search_kb":
-            docs = self._vectorstore.similarity_search(
-                query, k=top_k, filter={"kb_id": kb_id} if kb_id else None
-            )
-            if not docs:
-                return "知识库中没有找到相关信息。"
-            return "\n\n---\n\n".join(
-                f"[{d.metadata.get('source', '未知来源')}]\n{d.page_content}"
-                for d in docs
-            )
 
         if name == "search_web":
             key = os.getenv("SERPAPI_API_KEY")
@@ -272,15 +248,28 @@ class RAGAgent:
 
         tools = self._make_tools()
 
-        system_prompt = """你是一个智能助手，可以使用工具获取信息来回答问题。
+        # 混合 RAG：代码默认检索知识库（不设成工具让模型猜），真实结果注入给 LLM
+        kb_docs = self._vectorstore.similarity_search(
+            question, k=top_k, filter={"kb_id": kb_id} if kb_id else None
+        )
+        if kb_docs:
+            kb_context = "\n\n---\n\n".join(
+                f"[{d.metadata.get('source', '未知来源')}]\n{d.page_content}"
+                for d in kb_docs
+            )
+            kb_context_text = f"\n\n【知识库检索结果】\n{kb_context}"
+        else:
+            kb_context_text = "\n\n【知识库检索结果】\n（知识库中未检索到相关内容）"
+
+        system_prompt = """你是一个智能助手。已为你提供【知识库检索结果】作为参考。
 
 规则：
-1. 当用户问题需要基于文档/资料回答时，调用 search_kb 工具检索知识库
-2. 当问题涉及实时信息、且知识库可能没有答案时，调用 search_web 工具联网搜索
-3. 简单常识问题（如数学计算）可直接回答，不需要调用工具
-4. 根据工具返回的结果组织回答，引用信息来源
-5. 如果工具结果不足以回答问题，诚实说明，然后基于已有知识补充
-6. 回答要简洁、清晰、有条理，使用 Markdown 格式"""
+1. 优先基于【知识库检索结果】回答，并引用来源
+2. 当检索结果为空、不相关，或问题涉及实时/时效性信息时，调用 search_web 工具联网搜索补充
+3. 简单常识或闲聊问题，即使有检索结果也可直接回答
+4. 工具结果不足以回答时，诚实说明，然后基于已有知识补充
+5. 回答要简洁、清晰、有条理，使用 Markdown 格式"""
+        system_prompt += kb_context_text
 
         # 上下文压缩：最近 N 条保留原文，更早的折叠成摘要内联进 system prompt
         history = history or []
@@ -322,7 +311,7 @@ class RAGAgent:
                     used_tools.append(tool_name)
                     yield {"type": "tool", "name": tool_name, "status": "calling"}
 
-                    result = self._run_tool(tc, kb_id, top_k)
+                    result = self._run_tool(tc)
 
                     yield {"type": "tool", "name": tool_name, "status": "done"}
                     messages.append(AIMessage(content="", tool_calls=[tc]))
