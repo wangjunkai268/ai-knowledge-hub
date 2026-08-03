@@ -4,14 +4,6 @@ export interface ToolCall {
   status: 'calling' | 'done'
 }
 
-/** 结构化意图元数据（Structured Output） */
-export interface StructuredMeta {
-  intent?: string
-  confidence?: number
-  kb_id?: string | null
-  tools?: string[]
-}
-
 /** 单条消息 */
 export interface Message {
   id: number
@@ -20,7 +12,6 @@ export interface Message {
   sources?: string[]
   isStreaming?: boolean
   toolCalls?: ToolCall[]
-  structured?: StructuredMeta
 }
 
 /** 一个对话会话 */

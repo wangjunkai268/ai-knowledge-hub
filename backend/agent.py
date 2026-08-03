@@ -25,20 +25,6 @@ MAX_TOOL_ITERATIONS = 5
 # 上下文压缩：保留最近 N 条原文，更早的折叠成摘要
 MAX_WINDOW_MSGS = 20
 
-# 结构化输出：让 LLM 分析对话并输出意图元数据（JSON）
-STRUCTURED_SYSTEM = """分析这段对话，输出一个 JSON 对象（只输出 JSON，不要任何其他文字）：
-{
-  "intent": "kb_query" 或 "web_query" 或 "chat" 或 "mixed",
-  "confidence": 0到1之间的数字,
-  "kb_id": "命中的知识库id或null",
-  "tools": ["用过的工具名数组，没有则空数组"]
-}
-intent 含义：
-- kb_query: 基于知识库文档检索回答
-- web_query: 基于联网搜索回答
-- chat: 通用对话/常识回答，未使用工具
-- mixed: 结合多个来源综合回答"""
-
 
 class RAGAgent:
     def __init__(self):
@@ -141,65 +127,6 @@ class RAGAgent:
 
         return f"未知工具: {name}"
 
-    def _extract_json(self, text: str) -> dict | None:
-        """
-        从 LLM 输出中健壮地提取 JSON（多级解析，不赌模型输出纯 JSON）
-        返回 dict 或 None（全部失败）
-        """
-        import re, json
-
-        candidates = []
-
-        # 第一级：直接解析（最理想，纯 JSON）
-        candidates.append(text)
-
-        # 第二级：剥离 markdown 代码块围栏 ```json ... ```
-        m = re.search(r'```(?:json)?\s*(.*?)\s*```', text, re.DOTALL)
-        if m:
-            candidates.append(m.group(1))
-
-        # 第三级：提取第一个 { 到最后一个 } 之间内容（处理前缀文字/截断污染）
-        m = re.search(r'\{.*\}', text, re.DOTALL)
-        if m:
-            candidates.append(m.group(0))
-
-        for c in candidates:
-            try:
-                return json.loads(c)
-            except Exception:
-                continue
-        return None
-
-    def _extract_structured(self, llm, question: str, answer: str, used_tools: list, kb_id: str | None) -> tuple:
-        """
-        让 LLM 分析用户问题与回答，输出结构化意图元数据（Structured Output）
-        只传纯净文本（question + answer），不用脏 messages
-        tools / kb_id 由代码确定，LLM 只判 intent / confidence
-        返回 (data, raw)；raw 为 LLM 原始返回，用于失败排查
-        """
-        result = llm.invoke([
-            SystemMessage(content=STRUCTURED_SYSTEM),
-            HumanMessage(content=f"用户问题：{question}\n\n助手回答：{answer}"),
-        ])
-        raw = result.content
-
-        data = self._extract_json(raw)
-        if data is None:
-            return {
-                "intent": "chat",
-                "confidence": 0.0,
-                "kb_id": kb_id,        # 代码确定
-                "tools": used_tools,   # 代码确定
-            }, raw
-
-        # 校验字段完整性
-        data.setdefault("intent", "chat")
-        data.setdefault("confidence", 0.0)
-        # 覆盖：tools / kb_id 用代码确定的，不依赖 LLM 猜
-        data["tools"] = used_tools
-        data["kb_id"] = kb_id
-        return data, raw
-
     def _summarize(self, llm, early_msgs: list) -> str:
         """把窗口外早期对话压成一段中文摘要（上下文压缩）"""
         lines = []
@@ -226,10 +153,9 @@ class RAGAgent:
     def query_stream(self, question: str, top_k: int = 5, temperature: float = 0.7, max_tokens: int = 2048, kb_id: str | None = None, history: list | None = None):
         """
         Tool Calling 流式查询，逐事件 yield
-        事件类型: text / tool / done / error / structured
+        事件类型: text / tool / done / error
         - {"type": "tool", "name", "status": "calling"|"done"} — 工具调用过程
         - {"type": "text", "content"} — 最终回答全文（前端打字机逐字显示）
-        - {"type": "structured", "data"} — 结构化意图元数据
         kb_id=None → 全局检索；指定 → 限定该知识库
         history=[{"role","content"}...] → 多轮对话上下文
         """
@@ -300,15 +226,14 @@ class RAGAgent:
         ]
 
         # Tool Calling 循环：LLM 自主决定是否调用工具
-        used_tools = []   # 代码记录实际用过的工具（结构化输出不靠 LLM 猜）
         for _ in range(MAX_TOOL_ITERATIONS):
             response = llm.invoke(messages, tools=tools)
 
             if response.tool_calls:
                 # 有工具调用 → 逐个执行并回传结果
                 for tc in response.tool_calls:
-                    tool_name = tc.get("name", "未知工具")
-                    used_tools.append(tool_name)
+                    tool_name = tc.get("name", 
+                                    "未知工具")
                     yield {"type": "tool", "name": tool_name, "status": "calling"}
 
                     result = self._run_tool(tc)
@@ -321,9 +246,6 @@ class RAGAgent:
             # 无工具调用 → 最终回答
             if response.content:
                 yield {"type": "text", "content": response.content}
-                # 额外输出结构化意图元数据（只传纯净文本，tools/kb_id 代码确定）
-                meta, raw = self._extract_structured(llm, question, response.content, used_tools, kb_id)
-                yield {"type": "structured", "data": meta, "raw": raw}
                 yield {"type": "done", "content": response.content}
             return
 

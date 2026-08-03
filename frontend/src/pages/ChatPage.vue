@@ -75,9 +75,6 @@ async function handleSend() {
           const tc = msgs[aiIndex].toolCalls!.find(t => t.name === chunk.name)
           if (tc) tc.status = 'done'
         }
-      } else if (chunk.type === 'structured') {
-        // 结构化意图元数据
-        msgs[aiIndex].structured = chunk.data
       }
     },
     () => { loading.value = false },
@@ -149,7 +146,6 @@ watch(() => chatStore.currentId, () => {
         :content="msg.content"
         :sources="msg.sources"
         :tool-calls="msg.toolCalls"
-        :structured="msg.structured"
         :is-streaming="msg.isStreaming"
       />
     </div>
