@@ -22,6 +22,20 @@ EMBEDDING_MODEL = "shibing624/text2vec-base-chinese"
 # 工具调用循环上限（防止 LLM 无限调用工具）
 MAX_TOOL_ITERATIONS = 5
 
+# 结构化输出：让 LLM 分析对话并输出意图元数据（JSON）
+STRUCTURED_SYSTEM = """分析这段对话，输出一个 JSON 对象（只输出 JSON，不要任何其他文字）：
+{
+  "intent": "kb_query" 或 "web_query" 或 "chat" 或 "mixed",
+  "confidence": 0到1之间的数字,
+  "kb_id": "命中的知识库id或null",
+  "tools": ["用过的工具名数组，没有则空数组"]
+}
+intent 含义：
+- kb_query: 基于知识库文档检索回答
+- web_query: 基于联网搜索回答
+- chat: 通用对话/常识回答，未使用工具
+- mixed: 结合多个来源综合回答"""
+
 
 class RAGAgent:
     def __init__(self):
@@ -148,6 +162,23 @@ class RAGAgent:
 
         return f"未知工具: {name}"
 
+    def _extract_structured(self, llm, messages: list) -> dict:
+        """
+        让 LLM 分析对话，输出结构化意图元数据（Structured Output）
+        解析失败时返回默认值，不阻塞回答
+        """
+        import json
+
+        result = llm.invoke([
+            SystemMessage(content=STRUCTURED_SYSTEM),
+            *messages[-6:],   # 最近几轮上下文
+        ])
+        try:
+            data = json.loads(result.content)
+            return data
+        except Exception:
+            return {"intent": "chat", "confidence": 0.0, "kb_id": None, "tools": []}
+
     # ─── 查询主流程 ──────────────────────────────────────
 
     def query_stream(self, question: str, top_k: int = 5, temperature: float = 0.7, max_tokens: int = 2048, kb_id: str | None = None):
@@ -208,6 +239,9 @@ class RAGAgent:
             # 无工具调用 → 最终回答
             if response.content:
                 yield {"type": "text", "content": response.content}
+                # 额外输出结构化意图元数据
+                meta = self._extract_structured(llm, messages)
+                yield {"type": "structured", "data": meta}
                 yield {"type": "done", "content": response.content}
             return
 

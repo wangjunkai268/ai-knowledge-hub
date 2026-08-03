@@ -2,7 +2,7 @@
 import { computed } from 'vue'
 import { marked } from 'marked'
 import SourceCard from './SourceCard.vue'
-import type { ToolCall } from '../types/chat'
+import type { ToolCall, StructuredMeta } from '../types/chat'
 
 const props = defineProps<{
   role: 'user' | 'assistant'
@@ -10,6 +10,7 @@ const props = defineProps<{
   sources?: string[]
   isStreaming?: boolean
   toolCalls?: ToolCall[]
+  structured?: StructuredMeta
 }>()
 
 const htmlContent = computed(() => {
@@ -25,6 +26,26 @@ const TOOL_NAMES: Record<string, string> = {
 }
 function toolName(name: string): string {
   return TOOL_NAMES[name] ?? name
+}
+
+// 意图 → 中文
+const INTENT_LABELS: Record<string, string> = {
+  kb_query: '知识库查询',
+  web_query: '联网搜索',
+  chat: '通用对话',
+  mixed: '综合检索',
+}
+function intentLabel(intent?: string): string {
+  if (!intent) return '未知'
+  return INTENT_LABELS[intent] ?? intent
+}
+
+// 置信度颜色
+function confidenceColor(c?: number): string {
+  if (c == null) return 'text-gray-400'
+  if (c >= 0.8) return 'text-emerald-600 dark:text-emerald-400'
+  if (c >= 0.5) return 'text-yellow-600 dark:text-yellow-400'
+  return 'text-red-500'
 }
 </script>
 
@@ -84,6 +105,36 @@ function toolName(name: string): string {
 
       <!-- 来源引用 -->
       <SourceCard v-if="sources && sources.length && !isStreaming" :sources="sources" />
+
+      <!-- 智能分析卡片（Structured Output） -->
+      <div
+        v-if="structured && !isStreaming"
+        class="mt-2 border border-gray-200 dark:border-gray-700 rounded-lg px-3 py-2 bg-gray-50/70 dark:bg-gray-800/50"
+      >
+        <p class="text-[10px] text-gray-400 dark:text-gray-500 uppercase tracking-wide mb-1.5">智能分析</p>
+        <div class="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
+          <div class="flex justify-between">
+            <span class="text-gray-400 dark:text-gray-500">意图</span>
+            <span class="font-medium text-gray-700 dark:text-gray-200">{{ intentLabel(structured.intent) }}</span>
+          </div>
+          <div class="flex justify-between">
+            <span class="text-gray-400 dark:text-gray-500">置信度</span>
+            <span class="font-medium" :class="confidenceColor(structured.confidence)">
+              {{ structured.confidence != null ? Math.round(structured.confidence * 100) + '%' : '—' }}
+            </span>
+          </div>
+          <div v-if="structured.kb_id" class="flex justify-between">
+            <span class="text-gray-400 dark:text-gray-500">来源库</span>
+            <span class="font-medium text-gray-700 dark:text-gray-200 truncate ml-2">{{ structured.kb_id }}</span>
+          </div>
+          <div v-if="structured.tools?.length" class="flex justify-between">
+            <span class="text-gray-400 dark:text-gray-500">工具</span>
+            <span class="font-medium text-indigo-600 dark:text-indigo-400">
+              {{ structured.tools.map(toolName).join('、') }}
+            </span>
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- 用户头像 -->
