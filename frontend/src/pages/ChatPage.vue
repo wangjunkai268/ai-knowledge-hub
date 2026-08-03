@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { ref, nextTick, onMounted } from 'vue'
+import { ref, nextTick, onMounted, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import { sendMessage } from '../api'
 import { useChatStore } from '../stores/chat'
 import { useKbStore } from '../stores/kb'
@@ -11,7 +12,7 @@ const kbStore = useKbStore()
 const input = ref('')
 const loading = ref(false)
 const chatRef = ref<HTMLDivElement>()
-
+const router = useRouter()
 let msgId = 0
 
 function scrollToBottom() {
@@ -103,6 +104,11 @@ function handleKeydown(e: KeyboardEvent) {
 onMounted(() => {
   chatStore.ensureSession()
   kbStore.load()
+})
+
+// 切换对话 → 滚动到底部（组件被 keep-alive 保活，onMounted 不会重复触发）
+watch(() => chatStore.currentId, () => {
+  scrollToBottom()
 })
 </script>
 
