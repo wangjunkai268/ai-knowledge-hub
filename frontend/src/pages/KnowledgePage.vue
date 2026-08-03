@@ -30,6 +30,12 @@ interface UploadTask {
 const uploadTasks = ref<UploadTask[]>([])
 let uploadIdCounter = 0
 
+// 只看当前知识库的上传进度（全部知识库时显示所有）
+const visibleTasks = computed(() => {
+  if (!kbStore.currentKbId) return uploadTasks.value
+  return uploadTasks.value.filter(t => t.kbId === kbStore.currentKbId)
+})
+
 // ─── Toast ──────────────────────────────
 const toast = ref<{ show: boolean; type: 'success' | 'error'; message: string }>({
   show: false, type: 'success', message: '',
@@ -236,7 +242,7 @@ watch(() => kbStore.currentKbId, () => {
       <!-- 上传进度条（每文件独立一条） -->
       <TransitionGroup name="progress" tag="div">
         <div
-          v-for="task in uploadTasks"
+          v-for="task in visibleTasks"
           :key="task.id"
           class="mt-3 bg-white dark:bg-gray-800 border rounded-lg px-4 py-3 transition-colors"
           :class="task.status === 'error' ? 'border-red-200' : task.status === 'done' ? 'border-emerald-200' : 'border-gray-200'"
