@@ -169,9 +169,16 @@ class RAGAgent:
         """
         import json
 
+        # 过滤掉原 SystemMessage（避免多个 System 指令冲突），
+        # 只保留对话内容 + 工具结果供分析
+        context = [
+            m for m in messages[-8:]
+            if not isinstance(m, SystemMessage)
+        ]
+
         result = llm.invoke([
             SystemMessage(content=STRUCTURED_SYSTEM),
-            *messages[-6:],   # 最近几轮上下文
+            *context,
         ])
         try:
             data = json.loads(result.content)
