@@ -1,5 +1,8 @@
 """
-Agent 核心 — 检索知识库 + 调用 DeepSeek 生成回答（支持流式输出）
+Agent 核心 — 基于 Tool Calling 的智能体
+
+LLM 自主决定是否调用工具（知识库检索 / 联网搜索），
+根据工具结果组织回答。这是从"RAG 应用"到"Agent"的关键。
 """
 import os
 from pathlib import Path
@@ -8,6 +11,7 @@ from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_chroma import Chroma
+from langchain_core.messages import SystemMessage, HumanMessage, AIMessage, ToolMessage
 
 load_dotenv()
 
@@ -15,12 +19,13 @@ ROOT = Path(__file__).parent
 CHROMA_DIR = ROOT / "chroma_db"
 EMBEDDING_MODEL = "shibing624/text2vec-base-chinese"
 
+# 工具调用循环上限（防止 LLM 无限调用工具）
+MAX_TOOL_ITERATIONS = 5
+
 
 class RAGAgent:
     def __init__(self):
-        # 懒加载 embedding（首次使用才初始化，节省启动时间）
         self._embeddings = None
-        self._llm = None
         self._vectorstore = None
         self._init_vectorstore()
 
@@ -56,58 +61,90 @@ class RAGAgent:
         self.close()
         self._init_vectorstore()
 
+    # ─── 工具定义 ────────────────────────────────────────
+
+    def _make_tools(self) -> list:
+        """构建工具 schema（OpenAI 风格 dict，避免 LangChain 工具类序列化问题）"""
+        return [
+            {
+                "type": "function",
+                "function": {
+                    "name": "search_kb",
+                    "description": "在知识库中检索信息，返回相关文档片段。当用户问题需要基于已有文档/资料回答时使用。",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "query": {
+                                "type": "string",
+                                "description": "用于检索知识库的关键词或问题",
+                            }
+                        },
+                        "required": ["query"],
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "search_web",
+                    "description": "联网搜索获取最新信息。当知识库没有答案、或问题涉及实时/时效性数据时使用。",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "query": {
+                                "type": "string",
+                                "description": "用于联网搜索的关键词或问题",
+                            }
+                        },
+                        "required": ["query"],
+                    },
+                },
+            },
+        ]
+
+    def _run_tool(self, tool_call: dict, kb_id: str | None, top_k: int = 5) -> str:
+        """执行单个工具调用，返回结果文本"""
+        name = tool_call.get("name", "")
+        args = tool_call.get("args", {})
+        query = args.get("query", "")
+
+        if name == "search_kb":
+            docs = self._vectorstore.similarity_search(
+                query, k=top_k, filter={"kb_id": kb_id} if kb_id else None
+            )
+            if not docs:
+                return "知识库中没有找到相关信息。"
+            return "\n\n---\n\n".join(
+                f"[{d.metadata.get('source', '未知来源')}]\n{d.page_content}"
+                for d in docs
+            )
+
+        if name == "search_web":
+            try:
+                from duckduckgo_search import DDGS
+                results = DDGS().text(query, max_results=5)
+                if not results:
+                    return "联网搜索没有返回结果。"
+                return "\n".join(f"{r['title']}\n{r['body']}" for r in results)
+            except Exception:
+                return "联网搜索暂时不可用，请基于知识库或已有知识回答。"
+
+        return f"未知工具: {name}"
+
+    # ─── 查询主流程 ──────────────────────────────────────
+
     def query_stream(self, question: str, top_k: int = 5, temperature: float = 0.7, max_tokens: int = 2048, kb_id: str | None = None):
         """
-        流式查询，逐 chunk yield
-        每个 chunk 格式: {"type": "text"|"sources"|"done"|"error", "content": str}
-        kb_id=None → 全局检索（模型自动跨库找相关内容）
-        kb_id=xxx  → 限定在该知识库检索
+        Tool Calling 流式查询，逐事件 yield
+        事件类型: text / tool / done / error
+        - {"type": "tool", "name", "status": "calling"|"done"} — 工具调用过程
+        - {"type": "text", "content"} — 最终回答全文（前端打字机逐字显示）
+        kb_id=None → 全局检索；指定 → 限定该知识库
         """
         if not self._vectorstore:
             yield {"type": "error", "content": "知识库为空，请先上传文档。"}
             return
 
-        # 1. 检索相关文档
-        if kb_id:
-            docs = self._vectorstore.similarity_search(
-                question, k=top_k, filter={"kb_id": kb_id}
-            )
-        else:
-            docs = self._vectorstore.similarity_search(question, k=top_k)
-
-        # 2. 拼接上下文
-        context_parts = []
-        sources = []
-        for i, doc in enumerate(docs, 1):
-            src = doc.metadata.get("source", "未知来源")
-            context_parts.append(f"[来源{i}: {src}]\n{doc.page_content}")
-            sources.append(src)
-
-        context = "\n\n---\n\n".join(context_parts)
-
-        # 3. 构建 prompt
-        system_prompt = """你是一个基于知识库的智能助手。请根据以下规则回答用户问题：
-
-1. 优先使用下方【参考资料】中的内容回答问题
-2. 如果参考资料中有相关信息，请基于这些信息给出准确答案
-3. 如果参考资料中没有相关信息，请诚实地说"知识库中暂无相关信息"，然后可以根据你的知识做补充说明
-4. 回答要简洁、清晰、有条理，使用 Markdown 格式"""
-
-        user_prompt = f"""【参考资料】
-{context}
-
-【用户问题】
-{question}"""
-
-        # 4. 调用 LLM 流式生成
-        from langchain_core.messages import SystemMessage, HumanMessage
-
-        messages = [
-            SystemMessage(content=system_prompt),
-            HumanMessage(content=user_prompt),
-        ]
-
-        # 每次请求创建新的 LLM 实例，确保参数生效
         llm = ChatOpenAI(
             model="deepseek-chat",
             openai_api_key=os.getenv("DEEPSEEK_API_KEY"),
@@ -117,15 +154,48 @@ class RAGAgent:
             streaming=True,
         )
 
-        full_text = ""
-        for chunk in llm.stream(messages):
-            if chunk.content:
-                full_text += chunk.content
-                yield {"type": "text", "content": chunk.content}
+        tools = self._make_tools()
 
-        # 最后返回来源
-        yield {"type": "sources", "sources": sources}
-        yield {"type": "done", "content": full_text}
+        system_prompt = """你是一个智能助手，可以使用工具获取信息来回答问题。
+
+规则：
+1. 当用户问题需要基于文档/资料回答时，调用 search_kb 工具检索知识库
+2. 当问题涉及实时信息、且知识库可能没有答案时，调用 search_web 工具联网搜索
+3. 简单常识问题（如数学计算）可直接回答，不需要调用工具
+4. 根据工具返回的结果组织回答，引用信息来源
+5. 如果工具结果不足以回答问题，诚实说明，然后基于已有知识补充
+6. 回答要简洁、清晰、有条理，使用 Markdown 格式"""
+
+        messages = [
+            SystemMessage(content=system_prompt),
+            HumanMessage(content=question),
+        ]
+
+        # Tool Calling 循环：LLM 自主决定是否调用工具
+        for _ in range(MAX_TOOL_ITERATIONS):
+            response = llm.invoke(messages, tools=tools)
+
+            if response.tool_calls:
+                # 有工具调用 → 逐个执行并回传结果
+                for tc in response.tool_calls:
+                    tool_name = tc.get("name", "未知工具")
+                    yield {"type": "tool", "name": tool_name, "status": "calling"}
+
+                    result = self._run_tool(tc, kb_id, top_k)
+
+                    yield {"type": "tool", "name": tool_name, "status": "done"}
+                    messages.append(AIMessage(content="", tool_calls=[tc]))
+                    messages.append(ToolMessage(content=result, tool_call_id=tc.get("id", "")))
+                continue
+
+            # 无工具调用 → 最终回答
+            if response.content:
+                yield {"type": "text", "content": response.content}
+                yield {"type": "done", "content": response.content}
+            return
+
+        # 超过循环上限仍未完成
+        yield {"type": "error", "content": "工具调用次数过多，请换个问法试试。"}
 
 
 # 全局单例

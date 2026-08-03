@@ -1,3 +1,9 @@
+/** 工具调用记录 */
+export interface ToolCall {
+  name: string
+  status: 'calling' | 'done'
+}
+
 /** 单条消息 */
 export interface Message {
   id: number
@@ -5,6 +11,7 @@ export interface Message {
   content: string
   sources?: string[]
   isStreaming?: boolean
+  toolCalls?: ToolCall[]
 }
 
 /** 一个对话会话 */

@@ -21,7 +21,7 @@ const router = createRouter({
 const pinia = createPinia()
 pinia.use(piniaPluginPersistedstate)
 
-// 路由守卫：进入聊天页后滚动到底部（导航完成后 DOM 已就绪）
+// 路由守卫：负责从别的页面进入聊天页后滚动到底部（导航完成后 DOM 已就绪）
 router.afterEach((to) => {
   if (to.name !== 'chat') return
   setTimeout(() => {

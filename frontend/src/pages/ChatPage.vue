@@ -12,7 +12,7 @@ const kbStore = useKbStore()
 const input = ref('')
 const loading = ref(false)
 const chatRef = ref<HTMLDivElement>()
-const router = useRouter()
+
 let msgId = 0
 
 function scrollToBottom() {
@@ -60,6 +60,16 @@ async function handleSend() {
         buffer += chunk.content
       } else if (chunk.type === 'sources') {
         msgs[aiIndex].sources = chunk.sources
+      } else if (chunk.type === 'tool') {
+        // 工具调用过程：calling → 记录进行中；done → 标记完成
+        if (!msgs[aiIndex].toolCalls) msgs[aiIndex].toolCalls = []
+        if (chunk.status === 'calling') {
+          msgs[aiIndex].toolCalls.push({ name: chunk.name, status: 'calling' })
+          scrollToBottom()
+        } else {
+          const tc = msgs[aiIndex].toolCalls!.find(t => t.name === chunk.name)
+          if (tc) tc.status = 'done'
+        }
       }
     },
     () => { loading.value = false },
@@ -106,6 +116,9 @@ onMounted(() => {
   kbStore.load()
 })
 
+watch(() => chatStore.currentId, () => {
+  scrollToBottom()
+})
 </script>
 
 <template>
@@ -126,6 +139,7 @@ onMounted(() => {
         :role="msg.role"
         :content="msg.content"
         :sources="msg.sources"
+        :tool-calls="msg.toolCalls"
         :is-streaming="msg.isStreaming"
       />
     </div>
