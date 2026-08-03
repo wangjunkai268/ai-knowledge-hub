@@ -162,13 +162,40 @@ class RAGAgent:
 
         return f"未知工具: {name}"
 
+    def _extract_json(self, text: str) -> dict | None:
+        """
+        从 LLM 输出中健壮地提取 JSON（多级解析，不赌模型输出纯 JSON）
+        返回 dict 或 None（全部失败）
+        """
+        import re, json
+
+        candidates = []
+
+        # 第一级：直接解析（最理想，纯 JSON）
+        candidates.append(text)
+
+        # 第二级：剥离 markdown 代码块围栏 ```json ... ```
+        m = re.search(r'```(?:json)?\s*(.*?)\s*```', text, re.DOTALL)
+        if m:
+            candidates.append(m.group(1))
+
+        # 第三级：提取第一个 { 到最后一个 } 之间内容（处理前缀文字/截断污染）
+        m = re.search(r'\{.*\}', text, re.DOTALL)
+        if m:
+            candidates.append(m.group(0))
+
+        for c in candidates:
+            try:
+                return json.loads(c)
+            except Exception:
+                continue
+        return None
+
     def _extract_structured(self, llm, messages: list) -> dict:
         """
         让 LLM 分析对话，输出结构化意图元数据（Structured Output）
         解析失败时返回默认值，不阻塞回答
         """
-        import json
-
         # 过滤掉原 SystemMessage（避免多个 System 指令冲突），
         # 只保留对话内容 + 工具结果供分析
         context = [
@@ -180,11 +207,16 @@ class RAGAgent:
             SystemMessage(content=STRUCTURED_SYSTEM),
             *context,
         ])
-        try:
-            data = json.loads(result.content)
-            return data
-        except Exception:
+        data = self._extract_json(result.content)
+        if data is None:
             return {"intent": "chat", "confidence": 0.0, "kb_id": None, "tools": []}
+
+        # 校验字段完整性，防止缺字段
+        data.setdefault("intent", "chat")
+        data.setdefault("confidence", 0.0)
+        data.setdefault("kb_id", None)
+        data.setdefault("tools", [])
+        return data
 
     # ─── 查询主流程 ──────────────────────────────────────
 
