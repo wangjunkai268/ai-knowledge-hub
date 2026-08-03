@@ -22,6 +22,9 @@ EMBEDDING_MODEL = "shibing624/text2vec-base-chinese"
 # 工具调用循环上限（防止 LLM 无限调用工具）
 MAX_TOOL_ITERATIONS = 5
 
+# 上下文压缩：保留最近 N 条原文，更早的折叠成摘要
+MAX_WINDOW_MSGS = 20
+
 # 结构化输出：让 LLM 分析对话并输出意图元数据（JSON）
 STRUCTURED_SYSTEM = """分析这段对话，输出一个 JSON 对象（只输出 JSON，不要任何其他文字）：
 {
@@ -218,6 +221,27 @@ class RAGAgent:
         data.setdefault("tools", [])
         return data
 
+    def _summarize(self, llm, early_msgs: list) -> str:
+        """把窗口外早期对话压成一段中文摘要（上下文压缩）"""
+        lines = []
+        for item in early_msgs:
+            role = "用户" if item.get("role") == "user" else "助手"
+            content = item.get("content", "")
+            if content:
+                lines.append(f"{role}: {content}")
+        if not lines:
+            return ""
+
+        transcript = "\n".join(lines)
+        prompt = f"""以下是更早的对话记录，请总结成一段中文摘要（200字内）。
+要求：保留主题、重要事实、关键指代关系，不要遗漏用户提到的偏好或背景信息。
+只输出摘要文本，不要任何其他内容。
+
+对话记录：
+{transcript}"""
+        result = llm.invoke([HumanMessage(content=prompt)])
+        return result.content.strip()
+
     # ─── 查询主流程 ──────────────────────────────────────
 
     def query_stream(self, question: str, top_k: int = 5, temperature: float = 0.7, max_tokens: int = 2048, kb_id: str | None = None, history: list | None = None):
@@ -255,18 +279,27 @@ class RAGAgent:
 5. 如果工具结果不足以回答问题，诚实说明，然后基于已有知识补充
 6. 回答要简洁、清晰、有条理，使用 Markdown 格式"""
 
-        # 构造 messages：历史（多轮上下文）+ 当前问题
+        # 上下文压缩：最近 N 条保留原文，更早的折叠成摘要内联进 system prompt
+        history = history or []
+        early = history[:-MAX_WINDOW_MSGS]          # 窗口外早期对话
+        recent = history[-MAX_WINDOW_MSGS:]         # 窗口内原文
+
+        if early:
+            summary = self._summarize(llm, early)
+            if summary:
+                system_prompt += f"\n\n【早期对话摘要】\n{summary}"
+
+        # 构造 messages：System(含摘要) + 窗口原文 + 当前问题
         history_msgs = []
-        if history:
-            for item in history:
-                role = item.get("role")
-                content = item.get("content", "")
-                if not content:
-                    continue
-                if role == "user":
-                    history_msgs.append(HumanMessage(content=content))
-                elif role == "assistant":
-                    history_msgs.append(AIMessage(content=content))
+        for item in recent:
+            role = item.get("role")
+            content = item.get("content", "")
+            if not content:
+                continue
+            if role == "user":
+                history_msgs.append(HumanMessage(content=content))
+            elif role == "assistant":
+                history_msgs.append(AIMessage(content=content))
 
         messages = [
             SystemMessage(content=system_prompt),
